@@ -159,9 +159,9 @@ def main():
     # Load model
     print(f'Build model {args.model.upper()}...')
     if args.model == 'mlp':
-        model = MLP(input_size=____, hidden_sizes=[1024,512,64,64], num_classes=____, activation="relu")
+        model = MLP(input_size=3*28*28, hidden_sizes=[1024,512,64,64], num_classes=9, activation="relu")
     if args.model == 'mobilenet':
-        model = MobileNet(num_classes=____)
+        model = MobileNet(num_classes=9)
     model.to(device)
     print(f"Initialized {args.model.upper()} model with {sum(p.numel() for p in model.parameters())} "
           f"total parameters, of which {sum(p.numel() for p in model.parameters() if p.requires_grad)} are learnable.")
@@ -223,6 +223,42 @@ def main():
                 indent=4,
             ))
 
+def plot_from_json(log_path):
+    with open(log_path, "r") as f:
+        logs = json.load(f)
+
+    train_losses = logs["train_losses"]
+    valid_losses = logs["valid_losses"]
+    train_accs = logs["train_accs"]
+    valid_accs = logs["valid_accs"]
+
+    epochs = range(1, len(train_losses) + 1)
+
+    plt.figure(figsize=(12, 5))
+
+    # ---- Loss ----
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_losses, label="Train loss")
+    plt.plot(epochs, valid_losses, label="Validation loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training & Validation Loss")
+    plt.legend()
+    plt.grid(True)
+
+    # ---- Accuracy ----
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, train_accs, label="Train accuracy")
+    plt.plot(epochs, valid_accs, label="Validation accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Training & Validation Accuracy")
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
-    main()
+    #main()
+    plot_from_json("MobileNet_log/results.json")
