@@ -28,7 +28,7 @@ from utils import DiceCELoss, DiceLoss
 from glob import glob
 import cv2
 from torch.utils.data import Dataset
-
+import json
 
 # seed experiment
 np.random.seed(42)
@@ -82,7 +82,10 @@ def parse_args():
 
 def dice_score(preds, targets):
     # Compute the dice score using the DiceLoss class
-    raise NotImplementedError
+    dice_loss = DiceLoss()
+    loss = dice_loss(preds, targets)
+    dice = 1-loss
+    return dice
 
 
 def train(epoch, model, dataloader, optimizer, loss_fn, accuracy_fn, device, args):
@@ -181,7 +184,7 @@ def main():
     
     # Load model
     print(f'Build UNET model...')
-    model = UNet(input_shape=____, num_classes=____)
+    model = UNet(input_shape=3, num_classes=1)
     model.to(device)
     print(f"Initialized UNET model with {sum(p.numel() for p in model.parameters())} "
           f"total parameters, of which {sum(p.numel() for p in model.parameters() if p.requires_grad)} are learnable.")
@@ -221,6 +224,20 @@ def main():
         valid_accs.append(acc)
         valid_times.append(wall_time)
 
+        # Save log if logdir provided
+    if args.logdir is not None:
+        print(f'Writing training logs to {args.logdir}...')
+        os.makedirs(args.logdir, exist_ok=True)
+        with open(os.path.join(args.logdir, 'results.json'), 'w') as f:
+            f.write(json.dumps(
+                {
+                    "train_losses": train_losses,
+                    "valid_losses": valid_losses,
+                    "train_accs": train_accs,
+                    "valid_accs": valid_accs,
+                },
+                indent=4,
+            ))
 
 if __name__ == "__main__":
     main()
