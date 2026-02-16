@@ -29,6 +29,7 @@ from glob import glob
 import cv2
 from torch.utils.data import Dataset
 import json
+import random
 
 # seed experiment
 np.random.seed(42)
@@ -38,23 +39,30 @@ torch.backends.cudnn.benchmark = True
 
 
 class GetDataset(Dataset):
-    def __init__(self, images_path, masks_path):
+    def __init__(self, images_path, masks_path,augmentation=None):
 
         self.images_path = images_path
         self.masks_path = masks_path
         self.n_samples = len(images_path)
+        self.augmentation = augmentation
 
     def __getitem__(self, index):
         """ Reading image """
         image = cv2.imread(self.images_path[index], cv2.IMREAD_COLOR)
         image = image/255.0
-        image = np.transpose(image, (2, 0, 1))
-        image = image.astype(np.float32)
-        image = torch.from_numpy(image)
+
 
         """ Reading mask """
         mask = cv2.imread(self.masks_path[index], cv2.IMREAD_GRAYSCALE)
         mask = mask/255.0
+
+        if self.augmentation:
+            image, mask = self.augmentation(image, mask)
+
+        image = np.transpose(image, (2, 0, 1))
+        image = image.astype(np.float32)
+        image = torch.from_numpy(image)
+
         mask = np.expand_dims(mask, axis=0)
         mask = mask.astype(np.float32)
         mask = torch.from_numpy(mask)
@@ -182,6 +190,14 @@ def main():
     train_set = GetDataset(train_x, train_y)
     val_set = GetDataset(valid_x, valid_y)
     
+    train_set_no_aug = GetDataset(train_x, train_y)
+
+    # take same index
+    img_orig, mask_orig = train_set_no_aug[0]
+    img_aug, mask_aug = train_set[0]
+
+    # visualize
+    visualize_before_after(img_orig, mask_orig, img_aug, mask_aug)
     # Load model
     print(f'Build UNET model...')
     model = UNet(input_shape=3, num_classes=1)
@@ -238,6 +254,82 @@ def main():
                 },
                 indent=4,
             ))
+
+def geometric_augmentation(image, mask):
+    h, w, _ = image.shape
+
+    # Rotation légère
+    angle = random.uniform(-20, 20)
+    M = cv2.getRotationMatrix2D((w//2, h//2), angle, 1.0)
+    image = cv2.warpAffine(image, M, (w, h))
+    mask = cv2.warpAffine(mask, M, (w, h))
+
+    # Flip horizontal
+    if random.random() > 0.5:
+        image = cv2.flip(image, 1)
+        mask = cv2.flip(mask, 1)
+
+    return image, mask
+
+
+def photometric_augmentation(image, mask):
+    # Brightness
+    factor = random.uniform(0.8, 1.2)
+    image = np.clip(image * factor, 0, 1)
+
+    # Contrast
+    mean = np.mean(image, axis=(0,1), keepdims=True)
+    contrast_factor = random.uniform(0.8, 1.2)
+    image = np.clip((image - mean) * contrast_factor + mean, 0, 1)
+
+    return image, mask
+
+
+def noise_blur_augmentation(image, mask):
+    # Gaussian blur
+    if random.random() > 0.5:
+        image = cv2.GaussianBlur(image, (5,5), 0)
+
+    # Gaussian noise
+    noise = np.random.normal(0, 0.02, image.shape)
+    image = np.clip(image + noise, 0, 1)
+
+    return image, mask
+
+
+def combined_augmentation(image, mask):
+    image, mask = geometric_augmentation(image, mask)
+    image, mask = photometric_augmentation(image, mask)
+    return image, mask
+
+
+import matplotlib.pyplot as plt
+
+def visualize_before_after(img_orig, mask_orig, img_aug, mask_aug):
+    img_orig = img_orig.permute(1, 2, 0).cpu().numpy()
+    mask_orig = mask_orig.squeeze().cpu().numpy()
+
+    img_aug = img_aug.permute(1, 2, 0).cpu().numpy()
+    mask_aug = mask_aug.squeeze().cpu().numpy()
+
+    fig, axes = plt.subplots(2, 2, figsize=(8, 8))
+
+    axes[0,0].imshow(img_orig)
+    axes[0,0].set_title("Original Image")
+    axes[0,1].imshow(mask_orig, cmap="gray")
+    axes[0,1].set_title("Original Mask")
+
+    axes[1,0].imshow(img_aug)
+    axes[1,0].set_title("Augmented Image")
+    axes[1,1].imshow(mask_aug, cmap="gray")
+    axes[1,1].set_title("Augmented Mask")
+
+    for ax in axes.flat:
+        ax.axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
 
 if __name__ == "__main__":
     main()
