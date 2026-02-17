@@ -30,6 +30,8 @@ import cv2
 from torch.utils.data import Dataset
 import json
 import random
+from scipy.ndimage import gaussian_filter
+import matplotlib.pyplot as plt
 
 # seed experiment
 np.random.seed(42)
@@ -187,7 +189,7 @@ def main():
     valid_y = sorted(glob(f"{dataset_path}/test/mask/*"))
     print(f"Dataset Size:\nTrain: {len(train_x)} - Valid: {len(valid_x)}\n")
     # Load the datasets with the custom Dataset class
-    train_set = GetDataset(train_x, train_y)
+    train_set = GetDataset(train_x, train_y, augmentation=combined_augmentation)
     val_set = GetDataset(valid_x, valid_y)
     
     train_set_no_aug = GetDataset(train_x, train_y)
@@ -265,7 +267,7 @@ def geometric_augmentation(image, mask):
     mask = cv2.warpAffine(mask, M, (w, h))
 
     # Flip horizontal
-    if random.random() > 0.5:
+    if random.random() > 0.3:
         image = cv2.flip(image, 1)
         mask = cv2.flip(mask, 1)
 
@@ -273,26 +275,54 @@ def geometric_augmentation(image, mask):
 
 
 def photometric_augmentation(image, mask):
-    # Brightness
+
     factor = random.uniform(0.8, 1.2)
     image = np.clip(image * factor, 0, 1)
 
-    # Contrast
     mean = np.mean(image, axis=(0,1), keepdims=True)
     contrast_factor = random.uniform(0.8, 1.2)
     image = np.clip((image - mean) * contrast_factor + mean, 0, 1)
 
+    if random.random() < 0.8:
+        img_uint8 = (image * 255).astype(np.uint8)
+
+        # canal vert (BGR -> index 1)
+        green = img_uint8[:,:,1]
+
+        clahe = cv2.createCLAHE(
+            clipLimit=3.0,
+            tileGridSize=(8,8)
+        )
+
+        green = clahe.apply(green)
+        img_uint8[:,:,1] = green
+
+        image = img_uint8.astype(np.float32) / 255.0
+
     return image, mask
 
 
-def noise_blur_augmentation(image, mask):
-    # Gaussian blur
-    if random.random() > 0.5:
-        image = cv2.GaussianBlur(image, (5,5), 0)
+def elastic_deformation(image, mask, alpha=15, sigma=3):
 
-    # Gaussian noise
-    noise = np.random.normal(0, 0.02, image.shape)
-    image = np.clip(image + noise, 0, 1)
+    random_state = np.random.RandomState(None)
+    shape = image.shape[:2]
+
+    dx = gaussian_filter(
+        (random_state.rand(*shape) * 2 - 1),
+        sigma
+    ) * alpha
+
+    dy = gaussian_filter(
+        (random_state.rand(*shape) * 2 - 1),
+        sigma
+    ) * alpha
+
+    x, y = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]))
+    map_x = (x + dx).astype(np.float32)
+    map_y = (y + dy).astype(np.float32)
+
+    image = cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR)
+    mask = cv2.remap(mask, map_x, map_y, interpolation=cv2.INTER_NEAREST)
 
     return image, mask
 
@@ -300,10 +330,9 @@ def noise_blur_augmentation(image, mask):
 def combined_augmentation(image, mask):
     image, mask = geometric_augmentation(image, mask)
     image, mask = photometric_augmentation(image, mask)
+    #image, mask = elastic_deformation(image, mask)
     return image, mask
 
-
-import matplotlib.pyplot as plt
 
 def visualize_before_after(img_orig, mask_orig, img_aug, mask_aug):
     img_orig = img_orig.permute(1, 2, 0).cpu().numpy()
