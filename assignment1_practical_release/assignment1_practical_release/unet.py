@@ -25,28 +25,14 @@ class DecoderBlock(nn.Module):
     """
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
         self.conv = double_conv_block(in_channels, out_channels)
 
     def forward(self, x, skip):
-        x = self.up(x)
+        x = self.upconv(x)
         x = torch.cat([x, skip], dim=1)
         x = self.conv(x)
         return x
-
-
-class EncoderBlock(nn.Module):
-
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-
-        self.conv = double_conv_block(in_channels, out_channels)
-        self.pool = nn.MaxPool2d(2)
-
-    def forward(self, x):
-        x = self.conv(x)
-        p = self.pool(x)
-        return x, p
 
 
 class UNet(nn.Module):
@@ -55,32 +41,70 @@ class UNet(nn.Module):
 
         in_channels = input_shape
 
-        self.enc1 = EncoderBlock(in_channels, 64)
-        self.enc2 = EncoderBlock(64, 128)
-        self.enc3 = EncoderBlock(128, 256)
-        self.enc4 = EncoderBlock(256, 512)
+        self.encoder_block1 = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
+        
+        self.encoder_block2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
+        
+        self.encoder_block3 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
+        
+        self.encoder_block4 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
 
-        self.bottleneck = double_conv_block(512, 1024)
+        self.pool = nn.MaxPool2d(2)
 
-        self.dec1 = DecoderBlock(1024, 512)
-        self.dec2 = DecoderBlock(512, 256)
-        self.dec3 = DecoderBlock(256, 128)
-        self.dec4 = DecoderBlock(128, 64)
+        self.encoder_block5 = double_conv_block(512, 1024)
 
-        self.final_conv = nn.Conv2d(64, num_classes, 1)
+        # Decoder blocks
+        self.decoder_block1 = DecoderBlock(1024, 512)
+        self.decoder_block2 = DecoderBlock(512, 256)
+        self.decoder_block3 = DecoderBlock(256, 128)
+        self.decoder_block4 = DecoderBlock(128, 64)
+
+        # Output layer
+        self.outconv = nn.Conv2d(64, num_classes, 1)
 
     def forward(self, x):
-        s1, p1 = self.enc1(x)
-        s2, p2 = self.enc2(p1)
-        s3, p3 = self.enc3(p2)
-        s4, p4 = self.enc4(p3)
+        # Encoder with skip connections
+        s1 = self.encoder_block1(x)
+        p1 = self.pool(s1)
+        
+        s2 = self.encoder_block2(p1)
+        p2 = self.pool(s2)
+        
+        s3 = self.encoder_block3(p2)
+        p3 = self.pool(s3)
+        
+        s4 = self.encoder_block4(p3)
+        p4 = self.pool(s4)
 
-        b = self.bottleneck(p4)
+        # Bottleneck
+        b = self.encoder_block5(p4)
 
-        d1 = self.dec1(b, s4)
-        d2 = self.dec2(d1, s3)
-        d3 = self.dec3(d2, s2)
-        d4 = self.dec4(d3, s1)
+        # Decoder
+        d1 = self.decoder_block1(b, s4)
+        d2 = self.decoder_block2(d1, s3)
+        d3 = self.decoder_block3(d2, s2)
+        d4 = self.decoder_block4(d3, s1)
 
-        outputs = self.final_conv(d4)
+        # Output
+        outputs = self.outconv(d4)
         return outputs
